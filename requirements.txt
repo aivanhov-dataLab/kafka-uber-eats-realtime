@@ -1,0 +1,1 @@
+fastapi uvicorn[standard] kafka-python python-dotenv
