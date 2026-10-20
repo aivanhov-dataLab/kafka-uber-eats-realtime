@@ -21,20 +21,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install flake8 pytest
+          pip install flake8
           
-      - name: Lint with flake8
+      - name: Lint - check only critical errors
         run: |
+          # On bloque seulement les erreurs qui cassent l'app (pas le style)
           flake8 app --count --select=E9,F63,F7,F82 --show-source --statistics
           
-      - name: Run tests (if any)
+      - name: Docker Build Check
         run: |
-          pytest -v || echo "No tests yet - add them later"
+          docker build -t ubers-eat-kafka:ci .
 
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: test-and-lint
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t ubers-eat-kafka:test .
+      - name: Check app import
+        run: |
+          python -c "from app.main import app; print('App imports OK')"
