@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uber Eats Kafka Live</title>
+    <style>
+        /* Style simple et pro - recruteur friendly */
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f8f9fa; }
+        h1 { color: #000; }
+        .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        input, button { padding: 12px; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; }
+        input { width: 180px; margin-right: 10px; }
+        button { background: #000; color: white; cursor: pointer; border: none; font-weight: bold; }
+        button:hover { background: #333; }
+        #orders { margin-top: 20px; }
+        .order-card { background: white; border: 1px solid #eee; padding: 15px; margin: 10px 0; border-radius: 10px; border-left-width: 6px; transition: all 0.3s; }
+        .CREATED { border-left-color: #ff9800; }   /* Orange */
+        .ACCEPTED { border-left-color: #2196F3; }  /* Blue */
+        .DELIVERED { border-left-color: #4CAF50; } /* Green */
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; color: white; }
+        .badge-CREATED { background: #ff9800; }
+        .badge-ACCEPTED { background: #2196F3; }
+        .badge-DELIVERED { background: #4CAF50; }
+        .log { font-family: monospace; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <h1>🍔 Uber Eats Kafka - Live Tracking</h1>
+    <p>Commande en temps réel avec FastAPI + Confluent Kafka + WebSocket</p>
+
+    <!-- FORMULAIRE DE COMMANDE -->
+    <div class="card">
+        <h3>Nouvelle Commande</h3>
+        <form id="orderForm">
+            <input id="customer" placeholder="Prénom" value="Alex" required>
+            <input id="restaurant" placeholder="Restaurant" value="Burger King" required>
+            <input id="items" placeholder="Items" value="Whopper, Frites" required>
+            <button type="submit">Commander 🚀</button>
+        </form>
+    </div>
+
+    <!-- ZONE DE TRACKING LIVE -->
+    <div class="card">
+        <h3>Live Tracking <span id="clientCount">0 client connecté</span></h3>
+        <div id="orders">
+            <p style="color:#999">Aucune commande. Lance une commande pour voir le flux Kafka.</p>
+        </div>
+    </div>
+
+    <!-- LOGS TECHNIQUES -->
+    <div class="card">
+        <h4>Flux Kafka (topics)</h4>
+        <p class="log">order-created (3 partitions) → order-accepted → order-delivered</p>
+        <p class="log">Kafka UI: <a href="http://localhost:8080" target="_blank">http://localhost:8080</a></p>
+        <p class="log">API Docs: <a href="http://localhost:8000/docs" target="_blank">http://localhost:8000/docs</a></p>
+    </div>
+
+<script>
+    // ---------------------------------------------------
+    // JAVASCRIPT - Frontend temps réel
+    // ---------------------------------------------------
+    
+    // 1. Connexion WebSocket au backend FastAPI
+    // ws://localhost:8000/ws -> géré par app/main.py websocket_endpoint
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+    
+    const ordersDiv = document.getElementById('orders');
+    const orders = {}; // Stockage local des commandes: order_id -> order object
+
+    // 2. Quand le WebSocket reçoit un message (push du backend)
+    ws.onmessage = (event) => {
+        const order = JSON.parse(event.data);
+        console.log("WS Received:", order);
+        
+        // On stocke / met à jour la commande
+        orders[order.order_id] = order;
+        
+        // On re-render toute la liste
+        renderOrders();
+    };
+
+    ws.onopen = () => console.log("WebSocket connecté");
+    ws.onclose = () => console.log("WebSocket déconnecté - refresh la page");
+
+    // 3. Fonction de rendu - Affiche les commandes avec leur statut coloré
+    function renderOrders() {
+        const orderList = Object.values(orders).sort((a,b) => b.timestamp - a.timestamp);
+        
+        if (orderList.length === 0) return;
+
+        ordersDiv.innerHTML = orderList.map(o => `
+            <div class="order-card ${o.status}">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <b>${o.customer}</b> @ ${o.restaurant} 
+                        <span class="log">#${o.order_id.slice(0,8)}</span>
+                    </div>
+                    <span class="badge badge-${o.status}">${o.status}</span>
+                </div>
+                <div style="margin-top:8px;">${o.items} - ${o.total || 0}€</div>
+                <div class="log" style="margin-top:5px;">${new Date(o.timestamp*1000).toLocaleTimeString()} - ${o.type || ''}</div>
+            </div>
+        `).join('');
+    }
+
+    // 4. Envoi de commande - Appelle l'API FastAPI
+    document.getElementById('orderForm').onsubmit = async (e) => {
+        e.preventDefault(); // Empêche le refresh de la page
+        
+        const payload = {
+            customer: document.getElementById('customer').value,
+            restaurant: document.getElementById('restaurant').value,
+            items: document.getElementById('items').value,
+            total: 24.90
+        };
+
+        // POST vers FastAPI -> qui va produire dans Kafka
+        const res = await fetch('/api/order', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await res.json();
+        console.log("Order created:", data);
+        
+        // Le reste se fait tout seul via WebSocket
+        // Le backend va nous push la commande en CREATED, puis ACCEPTED, puis DELIVERED
+    };
+</script>
+</body>
+</html>
